@@ -25,10 +25,10 @@ import torch
 import torch.distributions as D
 from tensordict.tensordict import TensorDict, TensorDictBase
 from torchrl.data import (
-    UnboundedContinuousTensorSpec,
-    CompositeSpec,
-    BinaryDiscreteTensorSpec,
-    DiscreteTensorSpec
+    Unbounded as UnboundedContinuousTensorSpec,
+    Composite as CompositeSpec,
+    BinaryCategorical as DiscreteTensorSpec,
+    Categorical as DiscreteTensorSpec
 )
 
 import omni.isaac.core.utils.torch as torch_utils

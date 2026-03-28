@@ -30,9 +30,9 @@ from tensordict import TensorDict
 
 from torchrl.data import (
     TensorSpec,
-    BoundedTensorSpec,
-    UnboundedContinuousTensorSpec as UnboundedTensorSpec,
-    CompositeSpec,
+    Bounded as BoundedTensorSpec,
+    Unbounded as UnboundedTensorSpec,
+    Composite as CompositeSpec,
     TensorDictReplayBuffer
 )
 from torchrl.data.replay_buffers.storages import LazyTensorStorage

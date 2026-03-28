@@ -37,7 +37,7 @@ from omni.isaac.core.utils.extensions import enable_extension
 from omni.isaac.core.utils.viewports import set_camera_view
 
 from tensordict.tensordict import TensorDict, TensorDictBase
-from torchrl.data import CompositeSpec, TensorSpec, DiscreteTensorSpec
+from torchrl.data import Composite as CompositeSpec, TensorSpec, Categorical as DiscreteTensorSpec
 from torchrl.envs import EnvBase
 
 from omni_drones.robots.robot import RobotBase

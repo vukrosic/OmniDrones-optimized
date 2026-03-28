@@ -33,7 +33,7 @@ from omni_drones.robots.drone import MultirotorBase
 from omni_drones.views import RigidPrimView
 
 from tensordict.tensordict import TensorDict, TensorDictBase
-from torchrl.data import UnboundedContinuousTensorSpec, CompositeSpec, DiscreteTensorSpec
+from torchrl.data import Unbounded as UnboundedContinuousTensorSpec, Composite as CompositeSpec, Categorical as DiscreteTensorSpec
 from omni.isaac.debug_draw import _debug_draw
 
 from ..utils import lemniscate, scale_time

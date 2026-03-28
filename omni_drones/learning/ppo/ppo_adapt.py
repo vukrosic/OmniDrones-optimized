@@ -26,7 +26,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as D
 
-from torchrl.data import CompositeSpec, TensorSpec
+from torchrl.data import Composite as CompositeSpec, TensorSpec
 from torchrl.envs.transforms import CatTensors
 from torchrl.modules import ProbabilisticActor
 from torchrl.objectives.utils import hold_out_net

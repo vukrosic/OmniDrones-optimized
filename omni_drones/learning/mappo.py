@@ -34,12 +34,12 @@ from tensordict.nn import make_functional, TensorDictModule, TensorDictParams
 from torch.optim import lr_scheduler
 
 from torchrl.data import (
-    BoundedTensorSpec,
-    CompositeSpec,
-    MultiDiscreteTensorSpec,
-    DiscreteTensorSpec,
+    Bounded as BoundedTensorSpec,
+    Composite as CompositeSpec,
+    MultiCategorical as DiscreteTensorSpec,
+    Categorical as DiscreteTensorSpec,
     TensorSpec,
-    UnboundedContinuousTensorSpec as UnboundedTensorSpec,
+    Unbounded as UnboundedTensorSpec,
 )
 
 from omni_drones.utils.torchrl.env import AgentSpec

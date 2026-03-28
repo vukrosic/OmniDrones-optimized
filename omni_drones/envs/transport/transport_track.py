@@ -30,7 +30,7 @@ import omni_drones.utils.scene as scene_utils
 from omni.isaac.debug_draw import _debug_draw
 
 from tensordict.tensordict import TensorDict, TensorDictBase
-from torchrl.data import CompositeSpec, UnboundedContinuousTensorSpec, DiscreteTensorSpec
+from torchrl.data import Composite as CompositeSpec, Unbounded as UnboundedContinuousTensorSpec, Categorical as DiscreteTensorSpec
 
 from omni_drones.envs.isaac_env import AgentSpec, IsaacEnv
 from omni_drones.views import RigidPrimView

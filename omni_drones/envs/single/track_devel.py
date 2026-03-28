@@ -29,9 +29,9 @@ from torch.func import vmap
 from omni.isaac.debug_draw import _debug_draw
 from tensordict.tensordict import TensorDict, TensorDictBase
 from torchrl.data import (
-    BinaryDiscreteTensorSpec,
-    CompositeSpec,
-    UnboundedContinuousTensorSpec,
+    BinaryCategorical as DiscreteTensorSpec,
+    Composite as CompositeSpec,
+    Unbounded as UnboundedContinuousTensorSpec,
 )
 
 import omni_drones.utils.kit as kit_utils

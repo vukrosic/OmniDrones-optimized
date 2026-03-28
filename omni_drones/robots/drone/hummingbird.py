@@ -24,7 +24,7 @@
 import torch
 
 from omni.isaac.core.prims import RigidPrimView
-from torchrl.data import BoundedTensorSpec, UnboundedContinuousTensorSpec
+from torchrl.data import Bounded as BoundedTensorSpec, Unbounded as UnboundedContinuousTensorSpec
 
 from omni_drones.robots.drone.multirotor import MultirotorBase
 from omni_drones.robots.robot import ASSET_PATH

@@ -27,7 +27,7 @@ import torch.nn.functional as F
 from tensordict.nn import TensorDictModule
 
 from torchrl.data import (
-    DiscreteTensorSpec,
+    Categorical as DiscreteTensorSpec,
     TensorDictReplayBuffer
 )
 from torchrl.data.replay_buffers.storages import LazyTensorStorage

@@ -33,7 +33,7 @@ from hydra.core.config_store import ConfigStore
 from tensordict import TensorDict
 from tensordict.nn import TensorDictModuleBase, TensorDictModule, TensorDictSequential
 
-from torchrl.data import CompositeSpec, TensorSpec, UnboundedContinuousTensorSpec
+from torchrl.data import Composite as CompositeSpec, TensorSpec, Unbounded as UnboundedContinuousTensorSpec
 from torchrl.envs import CatTensors, TensorDictPrimer
 from torchrl.modules import ProbabilisticActor
 

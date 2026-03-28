@@ -28,7 +28,7 @@ from typing import Optional, Sequence
 
 from dataclasses import dataclass
 from torchrl.envs import EnvBase
-from torchrl.data import TensorSpec, CompositeSpec
+from torchrl.data import TensorSpec, Composite as CompositeSpec
 from tensordict import TensorDictBase
 
 

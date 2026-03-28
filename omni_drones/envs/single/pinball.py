@@ -34,9 +34,9 @@ from omni_drones.robots.drone import MultirotorBase
 from omni_drones.views import RigidPrimView
 from tensordict.tensordict import TensorDict, TensorDictBase
 from torchrl.data import (
-    UnboundedContinuousTensorSpec,
-    CompositeSpec,
-    DiscreteTensorSpec
+    Unbounded as UnboundedContinuousTensorSpec,
+    Composite as CompositeSpec,
+    Categorical as DiscreteTensorSpec
 )
 from pxr import UsdShade, PhysxSchema
 

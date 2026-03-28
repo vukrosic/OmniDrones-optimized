@@ -26,7 +26,7 @@ import torch.distributions as D
 from torch.func import vmap
 from omni.isaac.core.objects import DynamicCuboid
 from tensordict.tensordict import TensorDict, TensorDictBase
-from torchrl.data import CompositeSpec, UnboundedContinuousTensorSpec, DiscreteTensorSpec
+from torchrl.data import Composite as CompositeSpec, Unbounded as UnboundedContinuousTensorSpec, Categorical as DiscreteTensorSpec
 
 import omni_drones.utils.kit as kit_utils
 import omni_drones.utils.scene as scene_utils

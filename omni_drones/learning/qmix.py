@@ -29,7 +29,7 @@ from tensordict import TensorDict
 from tensordict.utils import expand_right
 from tensordict.nn import TensorDictModule, TensorDictSequential
 from torchrl.data import (
-    DiscreteTensorSpec,
+    Categorical as DiscreteTensorSpec,
 )
 from .modules.rnn import GRU
 from .modules.networks import ENCODERS_MAP, MLP

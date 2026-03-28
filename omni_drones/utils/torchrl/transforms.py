@@ -36,11 +36,11 @@ from torchrl.envs.transforms import (
 )
 from torchrl.data import (
     TensorSpec,
-    BoundedTensorSpec,
-    UnboundedContinuousTensorSpec,
-    DiscreteTensorSpec,
-    MultiDiscreteTensorSpec,
-    CompositeSpec,
+    Bounded as BoundedTensorSpec,
+    Unbounded as UnboundedContinuousTensorSpec,
+    Categorical as DiscreteTensorSpec,
+    MultiCategorical as DiscreteTensorSpec,
+    Composite as CompositeSpec,
 )
 from .env import AgentSpec
 from dataclasses import replace

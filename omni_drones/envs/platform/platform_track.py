@@ -31,7 +31,7 @@ from omni.isaac.debug_draw import _debug_draw
 import omni_drones.utils.kit as kit_utils
 
 from tensordict.tensordict import TensorDict, TensorDictBase
-from torchrl.data import UnboundedContinuousTensorSpec, CompositeSpec, DiscreteTensorSpec
+from torchrl.data import Unbounded as UnboundedContinuousTensorSpec, Composite as CompositeSpec, Categorical as DiscreteTensorSpec
 
 from omni_drones.envs.isaac_env import AgentSpec, IsaacEnv
 from omni_drones.views import RigidPrimView

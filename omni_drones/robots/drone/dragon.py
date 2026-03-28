@@ -25,7 +25,7 @@ from typing import Sequence
 import torch
 from dataclasses import dataclass, field, MISSING, fields, asdict
 
-from torchrl.data import BoundedTensorSpec, UnboundedContinuousTensorSpec, CompositeSpec
+from torchrl.data import Bounded as BoundedTensorSpec, Unbounded as UnboundedContinuousTensorSpec, Composite as CompositeSpec
 from tensordict.nn import make_functional
 
 import omni.isaac.core.utils.prims as prim_utils

@@ -28,7 +28,7 @@ from torch.func import vmap
 import omni.isaac.core.utils.torch as torch_utils
 import omni.isaac.core.utils.prims as prim_utils
 from tensordict.tensordict import TensorDict, TensorDictBase
-from torchrl.data import UnboundedContinuousTensorSpec, CompositeSpec, DiscreteTensorSpec
+from torchrl.data import Unbounded as UnboundedContinuousTensorSpec, Composite as CompositeSpec, Categorical as DiscreteTensorSpec
 
 import omni_drones.utils.kit as kit_utils
 

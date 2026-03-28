@@ -25,9 +25,9 @@ import torch
 import torch.distributions as D
 from tensordict.tensordict import TensorDict, TensorDictBase
 from torchrl.data import (
-    UnboundedContinuousTensorSpec,
-    CompositeSpec,
-    DiscreteTensorSpec
+    Unbounded as UnboundedContinuousTensorSpec,
+    Composite as CompositeSpec,
+    Categorical as DiscreteTensorSpec
 )
 
 import omni.isaac.core.objects as objects

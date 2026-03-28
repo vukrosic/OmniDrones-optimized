@@ -29,7 +29,7 @@ import torch.distributions as D
 import yaml
 from torch.func import vmap
 from tensordict.nn import make_functional
-from torchrl.data import BoundedTensorSpec, CompositeSpec, UnboundedContinuousTensorSpec
+from torchrl.data import Bounded as BoundedTensorSpec, Composite as CompositeSpec, Unbounded as UnboundedContinuousTensorSpec
 from tensordict import TensorDict
 
 from omni_drones.views import RigidPrimView
