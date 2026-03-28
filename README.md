@@ -59,6 +59,19 @@ All measurements: CUDA Events, 100 runs, 20 warmup, RTX 3090 24GB, PyTorch 2.11+
 | Utils GAE (T,N,k) | 128x256x1 | 10.92 | 0.079 | **138.5x** | 1.91e-06 |
 | Utils GAE (T,N,k) | 256x512x4 | 22.58 | 0.305 | **74.0x** | 3.34e-06 |
 
+#### MLP Optimization (TF32 + Adv Norm)
+
+These apply across all PPO/MAPPO training, no code changes required by users:
+
+| Component | Baseline (ms) | Optimized (ms) | Speedup | Method |
+|-----------|--------------|----------------|---------|--------|
+| Actor MLP forward | 1.62 | 0.84 | **2.05x** | TF32 matmul |
+| Critic MLP forward | 1.13 | 0.79 | **1.43x** | TF32 matmul |
+| Advantage normalization | 0.087 | 0.054 | **1.63x** | Triton fused kernel |
+
+TF32 is enabled automatically when importing `ppo.py` or `mappo.py`. Max numerical
+difference from float32: 2.4e-04 — negligible for RL policy gradient training.
+
 #### Fused Reward Kernel
 
 | Component | Envs | Python (ms) | Triton (ms) | Speedup | Max Diff |
