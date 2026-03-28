@@ -34,6 +34,11 @@ except ImportError:
     HAS_TRITON = False
 
 
+def _can_use_triton_no_grad(*tensors: torch.Tensor) -> bool:
+    # These helpers are used in both differentiable and non-differentiable paths.
+    return HAS_TRITON and all(t.is_cuda and not t.requires_grad for t in tensors)
+
+
 # ============================================================
 # Triton quaternion kernels (6-12x faster than PyTorch ops)
 # ============================================================
@@ -169,7 +174,7 @@ def others(x: torch.Tensor) -> torch.Tensor:
 
 
 def quaternion_to_rotation_matrix(quaternion: torch.Tensor) -> torch.Tensor:
-    if HAS_TRITON and quaternion.is_cuda:
+    if _can_use_triton_no_grad(quaternion):
         q_flat = quaternion.reshape(-1, 4).contiguous()
         N = q_flat.shape[0]
         out = torch.empty(N, 9, device=quaternion.device, dtype=quaternion.dtype)
@@ -276,7 +281,7 @@ def make_cells(
 
 
 def quat_rotate(q: torch.Tensor, v: torch.Tensor):
-    if HAS_TRITON and q.is_cuda:
+    if _can_use_triton_no_grad(q, v):
         batch_shape = q.shape[:-1]
         q_flat = q.reshape(-1, 4).contiguous()
         v_flat = v.reshape(-1, 3).contiguous()
@@ -287,7 +292,7 @@ def quat_rotate(q: torch.Tensor, v: torch.Tensor):
     return _quat_rotate_python(q, v)
 
 def quat_rotate_inverse(q: torch.Tensor, v: torch.Tensor):
-    if HAS_TRITON and q.is_cuda:
+    if _can_use_triton_no_grad(q, v):
         batch_shape = q.shape[:-1]
         q_flat = q.reshape(-1, 4).contiguous()
         v_flat = v.reshape(-1, 3).contiguous()
@@ -354,7 +359,7 @@ def axis_angle_to_matrix(angle, axis):
 
 def quat_mul(a: torch.Tensor, b: torch.Tensor):
     assert a.shape == b.shape
-    if HAS_TRITON and a.is_cuda:
+    if _can_use_triton_no_grad(a, b):
         shape = a.shape
         a_flat = a.reshape(-1, 4).contiguous()
         b_flat = b.reshape(-1, 4).contiguous()
@@ -392,4 +397,3 @@ def symlog(x: torch.Tensor):
 
 def symexp(x: torch.Tensor):
     return torch.sign(x) * (torch.exp(torch.abs(x)) - 1)
-

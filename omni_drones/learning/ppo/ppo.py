@@ -27,9 +27,6 @@ import torch.nn.functional as F
 import torch.distributions as D
 
 from torchrl.data import Composite as CompositeSpec, TensorSpec
-# Enable TF32 for ~2x faster matrix multiplications (Ampere+ GPUs, minor precision trade-off)
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
 
 from torchrl.modules import ProbabilisticActor
 from torchrl.envs.transforms import CatTensors
@@ -38,12 +35,12 @@ from tensordict.nn import TensorDictModuleBase, TensorDictModule, TensorDictSequ
 
 from hydra.core.config_store import ConfigStore
 from dataclasses import dataclass
-from typing import Union
+from typing import Optional, Union
 import einops
 
 from ..utils.valuenorm import ValueNorm1
 from ..modules.distributions import IndependentNormal
-from .common import GAE, make_mlp, normalize_advantages
+from .common import GAE, normalize_advantages, set_tf32_enabled
 
 @dataclass
 class PPOConfig:
@@ -57,6 +54,7 @@ class PPOConfig:
     priv_critic: bool = False
 
     checkpoint_path: Union[str, None] = None
+    allow_tf32: Optional[bool] = None
 
 cs = ConfigStore.instance()
 cs.store("ppo", node=PPOConfig, group="algo")
@@ -98,6 +96,7 @@ class PPOPolicy(TensorDictModuleBase):
         super().__init__()
         self.cfg = cfg
         self.device = device
+        set_tf32_enabled(self.cfg.allow_tf32)
 
         self.entropy_coef = 0.001
         self.clip_param = 0.1

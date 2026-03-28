@@ -36,7 +36,7 @@ from torch.optim import lr_scheduler
 from torchrl.data import (
     Bounded as BoundedTensorSpec,
     Composite as CompositeSpec,
-    MultiCategorical as DiscreteTensorSpec,
+    MultiCategorical as MultiDiscreteTensorSpec,
     Categorical as DiscreteTensorSpec,
     TensorSpec,
     Unbounded as UnboundedTensorSpec,
@@ -486,5 +486,4 @@ class Critic(nn.Module):
         if len(self.output_shape) > 1:
             values = values.unflatten(-1, self.output_shape)
         return values
-
 

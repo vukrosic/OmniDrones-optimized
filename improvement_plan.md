@@ -12,8 +12,8 @@ Generated: 2026-03-28. RTX 3090 24GB, PyTorch 2.11+cu126.
 | Reward (fused) | 4096 envs | **4.3x** | Standalone only |
 | Obs norm | 1024x128 | **4.7x** | Standalone only |
 | Adv norm | 64x128x4x1 | **1.63x** | Integrated (ppo.py + mappo.py) |
-| Actor MLP (TF32) | 32768x64 | **2.05x** | Integrated (ppo.py + mappo.py) |
-| Critic MLP (TF32) | 32768x64 | **1.43x** | Integrated (ppo.py + mappo.py) |
+| Actor MLP (TF32) | 32768x64 | **2.05x** | Opt-in via PPO/MAPPO config |
+| Critic MLP (TF32) | 32768x64 | **1.43x** | Opt-in via PPO/MAPPO config |
 
 ## Full PPO Step Profile (B=64, T=128, N=4, D=64)
 
@@ -36,7 +36,7 @@ passes but are only ~35% of total step time.
 ### DONE
 - [x] Task 2.1: Profile full PPO step — GAE eliminated, matmuls dominate (57%), ELU 18%, reduce 7%
 - [x] Task 2.2: Fuse advantage normalization — Triton kernel 1.63x, integrated into ppo.py + mappo.py
-- [x] Task 3.1: TF32 on actor/critic — 2.0x actor, 1.43x critic, integrated into ppo.py + mappo.py
+- [x] Task 3.1: TF32 on actor/critic — 2.0x actor, 1.43x critic, exposed as explicit opt-in
 
 ### TODO — Tier 1 (Environment-side, Standalone → Integrated)
 
@@ -74,11 +74,11 @@ passes but are only ~35% of total step time.
 
 **By kernel type:**
 - GAE sequential scan elimination: **34-248x** (primary optimization)
-- TF32 matrix multiplications: **1.4-2.0x** (free 2-liner)
+- TF32 matrix multiplications: **1.4-2.0x** (explicit opt-in, process-global)
 - Triton advantage normalization: **1.63x** (small absolute gain)
 - Fused reward computation: **4.3x** (standalone, not yet integrated in env)
 - Fused obs normalization: **4.7x** (standalone, not yet integrated)
 
-**Full training step**: The GAE speedup is the most impactful in practice — it eliminates
-a component that was 100x slower than it needed to be. In real training with many envs,
-GAE is called once per rollout and its speedup is pure walltime.
+**Full training step**: The GAE speedup is the largest microbenchmark win, but end-to-end
+PPO improvement remains modest because backward passes and optimizer work dominate the
+remaining wall time.

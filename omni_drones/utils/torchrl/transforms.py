@@ -39,7 +39,7 @@ from torchrl.data import (
     Bounded as BoundedTensorSpec,
     Unbounded as UnboundedContinuousTensorSpec,
     Categorical as DiscreteTensorSpec,
-    MultiCategorical as DiscreteTensorSpec,
+    MultiCategorical as MultiDiscreteTensorSpec,
     Composite as CompositeSpec,
 )
 from .env import AgentSpec
@@ -62,6 +62,14 @@ def _agent_spec(self: TransformedEnv) -> AgentSpec:
     agent_spec = self.transform.transform_agent_spec(self.base_env.agent_spec)
     return {name: replace(spec, _env=self) for name, spec in agent_spec.items()}
 TransformedEnv.agent_spec = property(_agent_spec)
+
+
+def _space_bounds(space):
+    if hasattr(space, "minimum") and hasattr(space, "maximum"):
+        return space.minimum, space.maximum
+    if hasattr(space, "low") and hasattr(space, "high"):
+        return space.low, space.high
+    raise AttributeError("Unsupported bounded space: expected minimum/maximum or low/high attributes.")
 
 
 class FromDiscreteAction(Transform):
@@ -89,8 +97,9 @@ class FromDiscreteAction(Transform):
                 raise ValueError(
                     "nbins must be int or list of length equal to the last dimension of action space."
                 )
-            self.minimum = action_spec.space.minimum.unsqueeze(-2)
-            self.maximum = action_spec.space.maximum.unsqueeze(-2)
+            minimum, maximum = _space_bounds(action_spec.space)
+            self.minimum = minimum.unsqueeze(-2)
+            self.maximum = maximum.unsqueeze(-2)
             self.mapping = torch.cartesian_prod(
                 *[torch.linspace(0, 1, dim_nbins) for dim_nbins in nbins]
             ).to(action_spec.device)  # [prod(nbins), len(nbins)]
@@ -139,8 +148,7 @@ class FromMultiDiscreteAction(Transform):
                 nbins, shape=action_spec.shape, device=action_spec.device
             )
             self.nvec = spec.nvec.to(action_spec.device)
-            self.minimum = action_spec.space.minimum
-            self.maximum = action_spec.space.maximum
+            self.minimum, self.maximum = _space_bounds(action_spec.space)
         else:
             NotImplementedError("Only BoundedTensorSpec is supported.")
         input_spec[("full_action_spec", *self.action_key)] = spec
@@ -334,4 +342,3 @@ class History(Transform):
                 item_history = tensordict.get(out_key)
                 item_history[_reset] = 0.
         return tensordict
-

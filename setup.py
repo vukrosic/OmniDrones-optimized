@@ -16,6 +16,6 @@ setup(
         "pandas",
         "moviepy",
         "av",
-        "torchrl", # for torch==2.2.2
+        "torchrl==0.11.1",  # validated against the current compatibility layer
     ],
 )

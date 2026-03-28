@@ -26,10 +26,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as D
 
-# Enable TF32 for ~2x faster matrix multiplications (Ampere+ GPUs)
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-
 from torchrl.data import Composite as CompositeSpec, TensorSpec
 from torchrl.modules import ProbabilisticActor
 from torchrl.envs.transforms import CatTensors
@@ -38,11 +34,12 @@ from tensordict.nn import TensorDictModule, TensorDictSequential
 
 from hydra.core.config_store import ConfigStore
 from dataclasses import dataclass
+from typing import Optional
 import logging
 
 from ..utils.valuenorm import ValueNorm1
 from ..modules.distributions import IndependentNormal
-from .common import GAE, make_mlp, normalize_advantages
+from .common import GAE, normalize_advantages, set_tf32_enabled
 
 @dataclass
 class PPOConfig:
@@ -52,6 +49,7 @@ class PPOConfig:
     num_minibatches: int = 16
 
     share_actor: bool = True
+    allow_tf32: Optional[bool] = None
 
 cs = ConfigStore.instance()
 cs.store("mappo", node=PPOConfig, group="algo")
@@ -90,6 +88,7 @@ class MAPPOPolicy:
     ):
         self.cfg = cfg
         self.device = device
+        set_tf32_enabled(self.cfg.allow_tf32)
 
         self.entropy_coef = 0.001
         self.clip_param = 0.1

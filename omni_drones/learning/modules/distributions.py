@@ -53,6 +53,11 @@ if HAS_TRITON:
 D.Distribution.set_default_validate_args(False)
 
 
+def _can_use_triton_expln(x: torch.Tensor) -> bool:
+    # Preserve autograd semantics: the Triton path is forward-only.
+    return HAS_TRITON and x.is_cuda and not x.requires_grad
+
+
 def init(module: nn.Module, weight_init, bias_init, gain=1):
     weight_init(module.weight.data, gain=gain)
     bias_init(module.bias.data)
@@ -64,9 +69,9 @@ def expln(x):
 
     https://people.idsia.ch/~juergen/ecml2008rueckstiess.pdf
 
-    Uses Triton kernel when available (10x faster), falls back to PyTorch otherwise.
+    Uses Triton for no-grad CUDA inputs and falls back to PyTorch when gradients are required.
     """
-    if HAS_TRITON and x.is_cuda:
+    if _can_use_triton_expln(x):
         N = x.numel()
         out = torch.empty_like(x)
         BLOCK = 1024
@@ -449,4 +454,3 @@ class TwoHot(D.Distribution):
         target = target.squeeze(-2)
 
         return (target * log_pred).sum(-1)
-

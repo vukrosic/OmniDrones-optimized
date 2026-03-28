@@ -29,11 +29,48 @@ def check(name, ref, out, rtol=1e-4, atol=1e-4):
         FAIL += 1
         print(f"  FAIL {name} (max_diff={diff:.2e})")
 
+
+def check_true(name, cond):
+    global PASS, FAIL
+    if cond:
+        PASS += 1
+        print(f"  PASS {name}")
+    else:
+        FAIL += 1
+        print(f"  FAIL {name}")
+
+
+def check_grad_match(name, ref_fn, fn, *inputs, rtol=1e-4, atol=1e-4):
+    ref_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+    fn_inputs = [x.detach().clone().requires_grad_(True) for x in inputs]
+    ref = ref_fn(*ref_inputs)
+    out = fn(*fn_inputs)
+    check_true(f"{name}_requires_grad", out.requires_grad)
+    check(f"{name}_forward_grad", ref.detach(), out.detach(), rtol=rtol, atol=atol)
+    if not out.requires_grad:
+        return
+    ref.sum().backward()
+    out.sum().backward()
+    for idx, (ref_in, fn_in) in enumerate(zip(ref_inputs, fn_inputs)):
+        grads_present = ref_in.grad is not None and fn_in.grad is not None
+        check_true(f"{name}_grad_present_{idx}", grads_present)
+        if grads_present:
+            check(f"{name}_grad_{idx}", ref_in.grad, fn_in.grad, rtol=rtol, atol=atol)
+
+
+def check_no_exception(name, fn):
+    try:
+        fn()
+        check_true(name, True)
+    except Exception as e:
+        check_true(name, False)
+        print(f"    ERROR {name}: {type(e).__name__}: {e}")
+
 # ============================================================
 # 1. PPO GAE (common.py) — (batch, steps, agents, 1) layout
 # ============================================================
 print("=== PPO GAE (common.py) ===")
-from omni_drones.learning.ppo.common import GAE
+from omni_drones.learning.ppo.common import GAE, normalize_advantages
 
 # Reference Python implementation
 def gae_ref(reward, terminated, value, next_value, gamma=0.99, lmbda=0.95):
@@ -57,6 +94,44 @@ for batch, steps, agents in [(4, 32, 1), (16, 32, 4), (64, 64, 4), (256, 128, 1)
     adv_new, ret_new = gae_mod(r, t, v, nv)
     check(f"ppo_gae({batch},{steps},{agents},1)_adv", adv_ref, adv_new)
     check(f"ppo_gae({batch},{steps},{agents},1)_ret", ret_ref, ret_new)
+
+
+print("\n=== Advantage normalization ===")
+for N in [2, 1024, 32768]:
+    adv = torch.randn(N, device=device)
+    ref = ((adv - adv.mean()) / adv.std().clamp_min(1e-7))
+    out = normalize_advantages(adv)
+    check(f"normalize_advantages(N={N})", ref, out)
+
+check_grad_match(
+    "normalize_advantages",
+    lambda x: (x - x.mean()) / x.std().clamp_min(1e-7),
+    normalize_advantages,
+    torch.randn(257, device=device),
+)
+
+
+print("\n=== TorchRL transforms compatibility ===")
+from omni_drones.utils.torchrl.transforms import FromDiscreteAction, FromMultiDiscreteAction
+from torchrl.data import Composite, Bounded
+
+def _make_action_spec():
+    return Composite({
+        ("full_action_spec", "agents", "action"): Bounded(
+            low=-torch.ones(2),
+            high=torch.ones(2),
+            shape=(2,),
+        )
+    })
+
+check_no_exception(
+    "from_discrete_action_transform",
+    lambda: FromDiscreteAction(action_key=("agents", "action"), nbins=3).transform_input_spec(_make_action_spec()),
+)
+check_no_exception(
+    "from_multi_discrete_action_transform",
+    lambda: FromMultiDiscreteAction(action_key=("agents", "action"), nbins=3).transform_input_spec(_make_action_spec()),
+)
 
 # ============================================================
 # 2. Utils GAE — compute_gae (N, T, k) and compute_gae_ (T, N, k)
@@ -214,6 +289,15 @@ for N in [64, 256, 1024]:
     ref = quat_mul_ref(a, b); out = quat_mul(a, b)
     check(f"quat_mul(N={N})", ref, out)
 
+q = torch.randn(64, 4, device=device); q = q / q.norm(dim=-1, keepdim=True)
+v = torch.randn(64, 3, device=device)
+check_grad_match("quat_rotate", quat_rotate_ref, quat_rotate, q, v)
+check_grad_match("quat_rotate_inverse", quat_rotate_inv_ref, quat_rotate_inverse, q, v)
+check_grad_match("quat_to_rotation_matrix", quat_to_rotmat_ref, quaternion_to_rotation_matrix, q)
+a = torch.randn(64, 4, device=device); a = a / a.norm(dim=-1, keepdim=True)
+b = torch.randn(64, 4, device=device); b = b / b.norm(dim=-1, keepdim=True)
+check_grad_match("quat_mul", quat_mul_ref, quat_mul, a, b)
+
 # --- expln ---
 from omni_drones.learning.modules.distributions import expln
 
@@ -227,6 +311,8 @@ def expln_ref(x):
 for N in [1024, 32768]:
     x = torch.randn(N, device=device)
     check(f"expln(N={N})", expln_ref(x), expln(x))
+
+check_grad_match("expln", expln_ref, expln, torch.randn(1024, device=device), rtol=1e-5, atol=1e-5)
 
 # --- hover_reward_triton ---
 from triton_kernels import hover_reward_triton

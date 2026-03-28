@@ -1,12 +1,34 @@
 ![Visualization of OmniDrones](docs/source/_static/visualization.jpg)
 
+# OmniDrones-Optimized
+
+This is a sped-up version of [btx0424/OmniDrones](https://github.com/btx0424/OmniDrones), focused on reducing GPU overhead in the PPO/MAPPO update path while preserving training semantics.
+
+Current verified headline result on the synthetic PPO update benchmark (`B=64`, `T=128`, `N=4`, `D_obs=64`, `D_act=4`, RTX 3090):
+
+- **2.63x faster** end-to-end than baseline without TF32
+- **2.73x faster** end-to-end than baseline with TF32 enabled
+
+What was changed in this fork:
+
+- Triton CUDA kernels for PPO GAE and utility GAE paths
+- Fused standalone Triton kernels for reward and normalization-heavy paths
+- Optional TF32 support for PPO/MAPPO MLPs
+- Autograd-safe PyTorch fallbacks for gradient-carrying helpers
+- TorchRL compatibility fixes for the currently tested stack
+
+Important scope note:
+
+- These headline numbers measure the full PPO **update step**: GAE, advantage normalization, actor/critic forward, loss construction, backward, grad clipping, and optimizer step
+- They do **not** include Isaac Sim environment stepping, so simulator-heavy training runs may see smaller overall wall-clock gains
+
 ---
 
-# Future of this Project
+## Upstream Project Notes
 
 I greatly appreciate the interest by the community in this project. However, due to several difficulties, this version of the project is hard to maintain and update anymore. I sincerely apologize for the inconvenience. There may or may not be a clearner refactored version in the future. If you believe it is highly helpful to your research, you are welcomed to contact me by emailing to btx0424@outlook.com.
 
-# OmniDrones
+## OmniDrones
 
 [![IsaacSim](https://img.shields.io/badge/Isaac%20Sim-4.1.0-orange.svg)](https://docs.omniverse.nvidia.com/app_isaacsim/app_isaacsim/overview.html)
 [![Python](https://img.shields.io/badge/python-3.10-blue.svg)](https://docs.python.org/3/whatsnew/3.7.html)
@@ -38,76 +60,139 @@ branch will still be maintained for compatibility. Feel free to raise issues if 
 or have ideas to discuss.
 
 
-## Performance Optimizations: Custom Triton CUDA Kernels
+## Optimization Details
 
-This fork replaces critical Python-loop bottlenecks with hand-written [Triton](https://github.com/openai/triton) CUDA kernels, achieving **34-248x speedups** on GAE (Generalized Advantage Estimation) — the dominant cost in PPO training — with zero functionality change.
+The goal of the fork is to reduce GPU overhead in the RL update path without silently changing training semantics. The main work targets PPO/MAPPO bottlenecks, especially GAE, plus a few hot utility kernels used in reward computation and quaternion math.
 
-### Speedup Summary
+### What This Fork Changes
 
-All measurements: CUDA Events, 100 runs, 20 warmup, RTX 3090 24GB, PyTorch 2.11+cu126.
+- Replaces Python-loop GAE implementations with [Triton](https://github.com/openai/triton) CUDA kernels in:
+  - `omni_drones/learning/ppo/common.py`
+  - `omni_drones/learning/utils/gae.py`
+- Adds fused standalone Triton kernels in `triton_kernels.py` for:
+  - GAE
+  - reward computation
+  - observation normalization
+  - hover reward
+- Adds optional TF32 support for PPO/MAPPO MLPs via config (`allow_tf32=true`) instead of mutating global backend flags at import time.
+- Keeps autograd-safe behavior by falling back to PyTorch for gradient-carrying paths such as `expln` and quaternion helpers.
+- Updates TorchRL compatibility for the current tested stack (`torchrl==0.11.1`).
 
-#### GAE Kernels (PPO Training Bottleneck)
+### How The Speedups Were Achieved
 
-| Component | Size | Python (ms) | Triton (ms) | Speedup | Max Diff |
-|-----------|------|-------------|-------------|---------|----------|
-| PPO GAE | 4x32x1 | 3.20 | 0.095 | **33.6x** | 1.07e-06 |
-| PPO GAE | 16x64x4 | 6.37 | 0.100 | **63.5x** | 2.38e-06 |
-| PPO GAE | 64x128x4 | 12.58 | 0.101 | **124.0x** | 3.34e-06 |
-| PPO GAE | 256x256x1 | 25.14 | 0.101 | **247.9x** | 5.72e-06 |
-| Utils GAE (N,T,k) | 256x128x1 | 11.91 | 0.078 | **153.0x** | 1.91e-06 |
-| Utils GAE (N,T,k) | 512x256x4 | 25.89 | 0.213 | **121.6x** | 3.34e-06 |
-| Utils GAE (T,N,k) | 128x256x1 | 10.92 | 0.079 | **138.5x** | 1.91e-06 |
-| Utils GAE (T,N,k) | 256x512x4 | 22.58 | 0.305 | **74.0x** | 3.34e-06 |
+#### 1. GAE kernel launch elimination
 
-#### MLP Optimization (TF32 + Adv Norm)
+Upstream GAE is written as a reverse Python loop over time steps. On CUDA that means one launch per step. This fork moves the reverse scan into Triton kernels, parallelizing across environments/agents while keeping the recurrence inside a single kernel launch.
 
-These apply across all PPO/MAPPO training, no code changes required by users:
+#### 2. Fused elementwise kernels
+
+A few reward and normalization paths are dominated by chains of small tensor ops. This fork fuses those into standalone Triton kernels to reduce launch overhead and intermediate tensor traffic.
+
+#### 3. Optional TF32 for matrix multiplies
+
+For Ampere+ GPUs, actor/critic forward passes can use TF32 matmuls. This is exposed as an explicit PPO/MAPPO config option rather than being forced on import.
+
+#### 4. Correctness-preserving fallbacks
+
+Some utility functions are used in differentiable code paths. Triton kernels that do not provide backward definitions are only used for no-grad CUDA inputs; otherwise the code falls back to standard PyTorch to preserve upstream autograd behavior.
+
+### Benchmarks
+
+Latest benchmark rerun was executed with:
+
+- GPU: RTX 3090 24GB
+- PyTorch: `2.11.0+cu126`
+- TorchRL: `0.11.1`
+- Method: CUDA Events, `100` measured runs, `20` warmup runs
+- Command: `python benchmark_rigorous.py`
+
+#### PPO GAE
+
+Median timings from the latest rerun:
+
+| Shape | Python (ms) | Triton (ms) | Speedup | Max Diff |
+|------|-------------:|------------:|--------:|---------:|
+| `4x32x1` | `3.067` | `0.095` | **32.2x** | `1.07e-06` |
+| `16x64x4` | `6.101` | `0.096` | **63.4x** | `2.38e-06` |
+| `64x128x4` | `12.037` | `0.096` | **125.1x** | `3.34e-06` |
+| `256x256x1` | `23.936` | `0.113` | **211.6x** | `5.72e-06` |
+
+#### Utility GAE
+
+Representative results from `compute_gae` / `compute_gae_`:
+
+| Kernel | Shape | Python (ms) | Triton (ms) | Speedup | Max Diff |
+|--------|------|-------------:|------------:|--------:|---------:|
+| `compute_gae` | `N256_T128_k1` | `11.756` | `0.078` | **151.1x** | `1.91e-06` |
+| `compute_gae` | `N512_T256_k4` | `23.942` | `0.213` | **112.4x** | `3.34e-06` |
+| `compute_gae_` | `T128_N256_k1` | `10.845` | `0.078` | **139.3x** | `1.91e-06` |
+| `compute_gae_` | `T256_N512_k4` | `24.198` | `0.306` | **79.0x** | `3.34e-06` |
+
+#### Standalone reward kernel
+
+| Envs | Python (ms) | Triton (ms) | Speedup | Max Diff |
+|------|-------------:|------------:|--------:|---------:|
+| `256` | `0.188` | `0.043` | **4.4x** | `1.49e-07` |
+| `1024` | `0.190` | `0.046` | **4.1x** | `1.19e-07` |
+| `4096` | `0.188` | `0.043` | **4.4x** | `1.64e-07` |
+| `16384` | `0.189` | `0.044` | **4.3x** | `1.79e-07` |
+
+#### Other measured optimizations
+
+Earlier profiling in this fork also measured:
 
 | Component | Baseline (ms) | Optimized (ms) | Speedup | Method |
-|-----------|--------------|----------------|---------|--------|
-| Actor MLP forward | 1.62 | 0.84 | **2.05x** | TF32 matmul |
-| Critic MLP forward | 1.13 | 0.79 | **1.43x** | TF32 matmul |
-| Advantage normalization | 0.087 | 0.054 | **1.63x** | Triton fused kernel |
+|-----------|--------------:|---------------:|--------:|--------|
+| Actor MLP forward | `1.62` | `0.84` | **2.05x** | TF32 matmul |
+| Critic MLP forward | `1.13` | `0.79` | **1.43x** | TF32 matmul |
+| Advantage normalization | `0.087` | `0.054` | **1.63x** | Triton fused kernel |
 
-TF32 is enabled automatically when importing `ppo.py` or `mappo.py`. Max numerical
-difference from float32: 2.4e-04 — negligible for RL policy gradient training.
+### Important Benchmark Caveat
 
-#### Fused Reward Kernel
+These are mostly kernel-level or rollout-side wins. They do not translate 1:1 into end-to-end PPO training speedups because backward passes, optimizer steps, and environment stepping still consume a large fraction of wall time.
 
-| Component | Envs | Python (ms) | Triton (ms) | Speedup | Max Diff |
-|-----------|------|-------------|-------------|---------|----------|
-| Reward | 256 | 0.188 | 0.043 | **4.4x** | 1.49e-07 |
-| Reward | 4096 | 0.187 | 0.044 | **4.3x** | 1.64e-07 |
-| Reward | 16384 | 0.189 | 0.044 | **4.3x** | 1.79e-07 |
+The strongest win in this fork is GAE. The overall training-step speedup will depend on your rollout length, number of environments, batch size, and how much of the wall clock is spent outside GAE.
 
-### Why These Speedups?
+For the synthetic PPO update benchmark used during development, the measured full-step speedups were:
 
-The original GAE implementation uses a Python `for` loop over time steps, launching a separate CUDA kernel per step. For 128 steps, that's 128 kernel launches with ~0.01ms overhead each. Our Triton kernels parallelize across environments/agents and loop over time *inside a single kernel*, reducing kernel launches from T to 1.
+| Mode | Mean (ms) | Median (ms) | Speedup vs baseline |
+|------|----------:|------------:|--------------------:|
+| Baseline | `18.143` | `17.907` | `1.00x` |
+| Optimized, TF32 off | `6.823` | `6.818` | **2.63x** |
+| Optimized, TF32 on | `6.576` | `6.552` | **2.73x** |
 
-### Correctness Verification
+### Correctness And Validation
 
-- 18 automated tests covering all kernel variants, multiple tensor shapes, and edge cases
-- Numerical stability verified: zeros, ones, large values (1000x), small values (1e-6), all-done, no-done
-- Maximum numerical difference: < 6e-06 across all tests (float32 reduction order)
-- All kernels include Python fallback for CPU or non-Triton environments
+- `tests/test_omnidrones_kernels.py` now passes with `70/70` checks on the remote benchmark machine.
+- Tests cover:
+  - forward numerical equivalence
+  - numerical-stability edge cases
+  - gradient-preserving behavior for autograd-sensitive helpers
+  - TorchRL transform compatibility
+- Gradient-requiring paths use PyTorch fallbacks when Triton would otherwise drop `grad_fn`.
+- CPU and non-Triton environments still use Python/PyTorch fallbacks.
 
-### How to Run Benchmarks
+### How To Use The Optimized Paths
+
+- GAE acceleration is automatic on CUDA when Triton is available.
+- TF32 is opt-in in PPO/MAPPO config:
+
+```yaml
+algo:
+  allow_tf32: true
+```
+
+- To rerun validation and benchmarks:
 
 ```bash
-# Run correctness tests
+# Correctness / regression checks
 python tests/test_omnidrones_kernels.py
 
-# Run full benchmark suite
+# Benchmark suite
 python benchmark_rigorous.py
 ```
 
-### Files Changed
-
-- `omni_drones/learning/ppo/common.py` — GAE class with Triton kernel + Python fallback
-- `omni_drones/learning/utils/gae.py` — `compute_gae` (N,T,k) and `compute_gae_` (T,N,k) with Triton
-- `triton_kernels.py` — Standalone Triton kernels (GAE, reward, obs normalization)
-- `tests/test_omnidrones_kernels.py` — Comprehensive correctness test suite
-- `benchmark_rigorous.py` — Multi-method benchmark with statistical analysis
+Full benchmark outputs are written to `benchmark_results.json`.
 
 ## Citation
 

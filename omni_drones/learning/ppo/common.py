@@ -23,7 +23,7 @@
 
 import torch
 import torch.nn as nn
-from typing import Sequence
+from typing import Optional, Sequence
 
 try:
     import triton
@@ -31,6 +31,13 @@ try:
     HAS_TRITON = True
 except ImportError:
     HAS_TRITON = False
+
+
+def set_tf32_enabled(enabled: Optional[bool]) -> None:
+    if enabled is None:
+        return
+    torch.backends.cuda.matmul.allow_tf32 = enabled
+    torch.backends.cudnn.allow_tf32 = enabled
 
 
 if HAS_TRITON:
@@ -150,8 +157,13 @@ if HAS_TRITON:
             total = total + tl.sum(vals, axis=0)
             total_sq = total_sq + tl.sum(vals * vals, axis=0)
         mean = total / N
-        var = total_sq / N - mean * mean
-        inv_std = 1.0 / tl.sqrt(var + eps)
+        var_num = total_sq - total * mean
+        if N > 1:
+            var = var_num / (N - 1)
+        else:
+            var = 0.0
+        std = tl.sqrt(tl.maximum(var, 0.0))
+        inv_std = 1.0 / tl.maximum(std, eps)
         for start in range(0, N, BLOCK):
             offsets = start + tl.arange(0, BLOCK)
             mask = offsets < N
@@ -160,10 +172,11 @@ if HAS_TRITON:
 
 
 def normalize_advantages(adv: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
-    """Normalize advantages: (adv - mean) / (std + eps).
-    Uses Triton kernel when available (1.6x faster), Python fallback otherwise.
+    """Normalize advantages with the same sample-std semantics as torch.std().
+
+    Uses Triton for no-grad CUDA tensors and falls back to PyTorch when gradients are required.
     """
-    if HAS_TRITON and adv.is_cuda:
+    if HAS_TRITON and adv.is_cuda and not adv.requires_grad:
         flat = adv.contiguous().view(-1)
         N = flat.numel()
         out = torch.empty_like(flat)
@@ -172,7 +185,7 @@ def normalize_advantages(adv: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
         return out.view(adv.shape)
     # Python fallback
     flat = adv.reshape(-1)
-    return ((flat - flat.mean()) / flat.std().clip(eps)).reshape(adv.shape)
+    return ((flat - flat.mean()) / flat.std().clamp_min(eps)).reshape(adv.shape)
 
 
 def make_mlp(num_units: Sequence[int,], activation=nn.LeakyReLU):
@@ -182,4 +195,3 @@ def make_mlp(num_units: Sequence[int,], activation=nn.LeakyReLU):
         layers.append(activation())
         layers.append(nn.LayerNorm(n))
     return nn.Sequential(*layers)
-
