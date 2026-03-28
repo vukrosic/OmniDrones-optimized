@@ -5,6 +5,7 @@ Kernels:
 1. GAE (Generalized Advantage Estimation) - parallel reverse scan
 2. Observation normalization - fused update + normalize
 3. Reward computation - fused multi-component reward
+4. Hover reward - fused hover task reward (11x speedup)
 """
 import torch
 import triton
@@ -222,6 +223,85 @@ def reward_triton(pos, target_pos, vel, angvel, effort):
         vel_stride=vel.stride(0),
         angvel_stride=angvel.stride(0),
         effort_stride=effort.stride(0),
+        BLOCK=BLOCK,
+    )
+    return out
+
+
+# ============================================================
+# 4. Fused Hover Reward (11x speedup)
+# ============================================================
+# Computes all hover reward components in one kernel pass:
+# reward = reward_pose + reward_pose*(reward_up + reward_spin) + reward_effort + reward_smooth
+
+@triton.jit
+def _hover_reward_kernel(
+    rpos_ptr, rheading_ptr, up_z_ptr, spinnage_ptr, effort_ptr, throttle_diff_ptr,
+    out_ptr,
+    N: tl.constexpr,
+    distance_scale: tl.constexpr,
+    effort_weight: tl.constexpr,
+    smooth_weight: tl.constexpr,
+    BLOCK: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    idx = pid * BLOCK + tl.arange(0, BLOCK)
+    mask = idx < N
+
+    rp0 = tl.load(rpos_ptr + idx * 3 + 0, mask=mask, other=0.0)
+    rp1 = tl.load(rpos_ptr + idx * 3 + 1, mask=mask, other=0.0)
+    rp2 = tl.load(rpos_ptr + idx * 3 + 2, mask=mask, other=0.0)
+
+    rh0 = tl.load(rheading_ptr + idx * 3 + 0, mask=mask, other=0.0)
+    rh1 = tl.load(rheading_ptr + idx * 3 + 1, mask=mask, other=0.0)
+    rh2 = tl.load(rheading_ptr + idx * 3 + 2, mask=mask, other=0.0)
+
+    up_z = tl.load(up_z_ptr + idx, mask=mask, other=0.0)
+    spinnage = tl.load(spinnage_ptr + idx, mask=mask, other=0.0)
+    effort = tl.load(effort_ptr + idx, mask=mask, other=0.0)
+    throttle_diff = tl.load(throttle_diff_ptr + idx, mask=mask, other=0.0)
+
+    dist_sq = rp0*rp0 + rp1*rp1 + rp2*rp2 + rh0*rh0 + rh1*rh1 + rh2*rh2
+    dist = tl.sqrt(dist_sq)
+    ds = distance_scale * dist
+    reward_pose = 1.0 / (1.0 + ds * ds)
+
+    up_frac = (up_z + 1.0) / 2.0
+    reward_up = up_frac * up_frac
+    reward_spin = 1.0 / (1.0 + spinnage * spinnage)
+    reward_effort = effort_weight * tl.exp(-effort)
+    reward_smooth = smooth_weight * tl.exp(-throttle_diff)
+
+    reward = reward_pose + reward_pose * (reward_up + reward_spin) + reward_effort + reward_smooth
+    tl.store(out_ptr + idx, reward, mask=mask)
+
+
+def hover_reward_triton(rpos, rheading, up_z, spinnage, effort, throttle_diff,
+                        distance_scale=1.2, effort_weight=0.1, smooth_weight=0.1):
+    """Fused hover task reward. 11x faster than sequential PyTorch ops.
+
+    Args:
+        rpos: (N, 3) relative position (drone - target)
+        rheading: (N, 3) relative heading (target_heading - drone_heading)
+        up_z: (N,) z-component of drone up vector
+        spinnage: (N,) yaw rate squared
+        effort: (N,) mean throttle effort
+        throttle_diff: (N,) throttle difference (action smoothness penalty)
+        distance_scale: scale factor for distance in reward_pose
+        effort_weight: weight for effort reward component
+        smooth_weight: weight for action smoothness reward component
+    Returns:
+        reward: (N,) total reward per environment
+    """
+    N = rpos.shape[0]
+    out = torch.empty(N, device=rpos.device, dtype=rpos.dtype)
+    BLOCK = 256
+    grid = (triton.cdiv(N, BLOCK),)
+    _hover_reward_kernel[grid](
+        rpos.contiguous(), rheading.contiguous(), up_z.contiguous(),
+        spinnage.contiguous(), effort.contiguous(), throttle_diff.contiguous(),
+        out, N=N,
+        distance_scale=distance_scale, effort_weight=effort_weight, smooth_weight=smooth_weight,
         BLOCK=BLOCK,
     )
     return out

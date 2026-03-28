@@ -140,6 +140,119 @@ for N in [256, 4096]:
     check(f"reward_triton(N={N})", ref, out)
 
 # ============================================================
+# 4. New Triton Kernels: quaternion ops, expln, hover reward
+# ============================================================
+print("\n=== New Triton Kernels ===")
+
+# --- quat_rotate / quat_rotate_inverse ---
+import functools
+
+def _manual_batch(func):
+    @functools.wraps(func)
+    def wrapped(*args, **kwargs):
+        batch_shapes = set(arg.shape[:-1] for arg in args if isinstance(arg, torch.Tensor))
+        batch_shape = batch_shapes.pop()
+        args = tuple(arg.reshape(-1, arg.shape[-1]) if isinstance(arg, torch.Tensor) else arg for arg in args)
+        out = func(*args, **kwargs)
+        return out.unflatten(0, batch_shape)
+    return wrapped
+
+@_manual_batch
+def quat_rotate_ref(q, v):
+    shape = q.shape
+    q_w = q[:, 0]; q_vec = q[:, 1:]
+    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
+    b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
+    c = q_vec * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1) * 2.0
+    return a + b + c
+
+@_manual_batch
+def quat_rotate_inv_ref(q, v):
+    shape = q.shape
+    q_w = q[:, 0]; q_vec = q[:, 1:]
+    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
+    b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
+    c = q_vec * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1) * 2.0
+    return a - b + c
+
+from omni_drones.utils.torch import quat_rotate, quat_rotate_inverse, quat_mul
+from omni_drones.utils.torch import quaternion_to_rotation_matrix
+
+for N in [64, 256, 1024]:
+    q = torch.randn(N, 4, device=device); q = q / q.norm(dim=-1, keepdim=True)
+    v = torch.randn(N, 3, device=device)
+    ref_r = quat_rotate_ref(q, v)
+    out_r = quat_rotate(q, v)
+    ref_i = quat_rotate_inv_ref(q, v)
+    out_i = quat_rotate_inverse(q, v)
+    check(f"quat_rotate(N={N})", ref_r, out_r)
+    check(f"quat_rotate_inverse(N={N})", ref_i, out_i)
+
+for N in [64, 256, 1024]:
+    q = torch.randn(N, 4, device=device); q = q / q.norm(dim=-1, keepdim=True)
+    def quat_to_rotmat_ref(quaternion):
+        w, x, y, z = torch.unbind(quaternion, dim=-1)
+        tx = 2.0*x; ty = 2.0*y; tz = 2.0*z
+        twx=tx*w; twy=ty*w; twz=tz*w; txx=tx*x; txy=ty*x; txz=tz*x; tyy=ty*y; tyz=tz*y; tzz=tz*z
+        m = torch.stack([1-(tyy+tzz), txy-twz, txz+twy, txy+twz, 1-(txx+tzz), tyz-twx,
+                         txz-twy, tyz+twx, 1-(txx+tyy)], dim=-1)
+        return m.unflatten(m.dim()-1, (3,3))
+    ref = quat_to_rotmat_ref(q)
+    out = quaternion_to_rotation_matrix(q)
+    check(f"quat_to_rotation_matrix(N={N})", ref, out)
+
+for N in [64, 256, 1024]:
+    def quat_mul_ref(a, b):
+        shape = a.shape; a = a.reshape(-1, 4); b = b.reshape(-1, 4)
+        w1,x1,y1,z1 = a[:,0],a[:,1],a[:,2],a[:,3]; w2,x2,y2,z2 = b[:,0],b[:,1],b[:,2],b[:,3]
+        ww=(z1+x1)*(x2+y2); yy=(w1-y1)*(w2+z2); zz=(w1+y1)*(w2-z2); xx=ww+yy+zz
+        qq=0.5*(xx+(z1-x1)*(x2-y2))
+        w=qq-ww+(z1-y1)*(y2-z2); x=qq-xx+(x1+w1)*(x2+w2); y=qq-yy+(w1-x1)*(y2+z2); z=qq-zz+(z1+y1)*(w2-x2)
+        return torch.stack([w,x,y,z], dim=-1).reshape(shape)
+    a = torch.randn(N, 4, device=device); a = a / a.norm(dim=-1, keepdim=True)
+    b = torch.randn(N, 4, device=device); b = b / b.norm(dim=-1, keepdim=True)
+    ref = quat_mul_ref(a, b); out = quat_mul(a, b)
+    check(f"quat_mul(N={N})", ref, out)
+
+# --- expln ---
+from omni_drones.learning.modules.distributions import expln
+
+def expln_ref(x):
+    out = torch.empty_like(x)
+    idx_neg = x <= 0
+    out[idx_neg] = x[idx_neg].exp()
+    out[~idx_neg] = x[~idx_neg].log1p() + 1
+    return out
+
+for N in [1024, 32768]:
+    x = torch.randn(N, device=device)
+    check(f"expln(N={N})", expln_ref(x), expln(x))
+
+# --- hover_reward_triton ---
+from triton_kernels import hover_reward_triton
+
+def hover_reward_ref(rpos, rheading, up_z, spinnage, effort, throttle_diff,
+                     ds=1.2, ew=0.1, sw=0.1):
+    distance = torch.norm(torch.cat([rpos, rheading], dim=-1), dim=-1)
+    rp = 1.0 / (1.0 + (ds * distance) ** 2)
+    ru = ((up_z + 1) / 2) ** 2
+    rs = 1.0 / (1.0 + spinnage ** 2)
+    re = ew * torch.exp(-effort)
+    rsm = sw * torch.exp(-throttle_diff)
+    return rp + rp * (ru + rs) + re + rsm
+
+for N in [256, 1024, 4096]:
+    rpos = torch.randn(N, 3, device=device)
+    rheading = torch.randn(N, 3, device=device)
+    up_z = torch.randn(N, device=device)
+    spinnage = torch.rand(N, device=device).abs()
+    effort = torch.rand(N, device=device).abs()
+    throttle_diff = torch.rand(N, device=device).abs()
+    ref = hover_reward_ref(rpos, rheading, up_z, spinnage, effort, throttle_diff)
+    out = hover_reward_triton(rpos, rheading, up_z, spinnage, effort, throttle_diff)
+    check(f"hover_reward_triton(N={N})", ref, out)
+
+# ============================================================
 # Summary
 # ============================================================
 print(f"\n{'='*40}")
