@@ -26,6 +26,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as D
 
+# Enable TF32 for ~2x faster matrix multiplications (Ampere+ GPUs)
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
 from torchrl.data import Composite as CompositeSpec, TensorSpec
 from torchrl.modules import ProbabilisticActor
 from torchrl.envs.transforms import CatTensors
@@ -38,7 +42,7 @@ import logging
 
 from ..utils.valuenorm import ValueNorm1
 from ..modules.distributions import IndependentNormal
-from .common import GAE
+from .common import GAE, make_mlp, normalize_advantages
 
 @dataclass
 class PPOConfig:
@@ -156,9 +160,7 @@ class MAPPOPolicy:
         next_values = self.value_norm.denormalize(next_values)
 
         adv, ret = self.gae(rewards, dones, values, next_values)
-        adv_mean = adv.mean()
-        adv_std = adv.std()
-        adv = (adv - adv_mean) / adv_std.clip(1e-7)
+        adv = normalize_advantages(adv, eps=1e-7)
         self.value_norm.update(ret)
         ret = self.value_norm.normalize(ret)
 
